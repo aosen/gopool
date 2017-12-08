@@ -19,19 +19,12 @@ package rediscli
 
 import (
 	"errors"
-	"fmt"
 	"strconv"
 	"time"
 
 	"github.com/aosen/gopool"
 	"github.com/garyburd/redigo/redis"
 	"github.com/juju/ratelimit"
-	"github.com/spaolacci/murmur3"
-)
-
-const (
-	SET_SLOT_CNT  = 1024
-	ZSET_SLOT_CNT = 1024
 )
 
 const (
@@ -388,102 +381,6 @@ func (rc *RedisCli) SMembers(key string) (reply []string, err error) {
 	return
 }
 
-//需要将本轮数据都push完再pop
-func (rc *RedisCli) SPush(key string, exp int, vals ...interface{}) (err error) {
-	var exist bool
-	exist, err = rc.Exists(fmt.Sprintf("%s___SLOT_NO", key))
-	if err != nil {
-		return
-	}
-	if !exist {
-		err = rc.Set(fmt.Sprintf("%s___SLOT_NO", key), "0", "EX", exp)
-		if err != nil {
-			return
-		}
-	}
-	packet := make([][]interface{}, SET_SLOT_CNT)
-	for _, valie := range vals {
-		val, ok := valie.(string)
-		if !ok {
-			err = errors.New("illegal value.")
-			return
-		}
-		hashval := murmur3.Sum64([]byte(val))
-		slot := hashval % SET_SLOT_CNT
-		packet[slot] = append(packet[slot], interface{}(val))
-	}
-	for slot, pack := range packet {
-		if len(pack) == 0 {
-			continue
-		}
-		e := rc.SAdd(fmt.Sprintf("%s___%d", key, slot), pack...)
-		if e != nil {
-			err = e
-		}
-		rc.Expire(fmt.Sprintf("%s___%d", key, slot), exp)
-	}
-	return
-}
-
-func (rc *RedisCli) SDel(key string, vals ...interface{}) (err error) {
-	var exist bool
-	exist, err = rc.Exists(fmt.Sprintf("%s___SLOT_NO", key))
-	if err != nil {
-		return
-	}
-	if !exist {
-		err = errors.New("not exist.")
-		return
-	}
-	packet := make([][]interface{}, SET_SLOT_CNT)
-	for _, valie := range vals {
-		val, ok := valie.(string)
-		if !ok {
-			err = errors.New("illegal value.")
-			return
-		}
-		hashval := murmur3.Sum64([]byte(val))
-		slot := hashval % SET_SLOT_CNT
-		packet[slot] = append(packet[slot], interface{}(val))
-	}
-	for slot, pack := range packet {
-		if len(pack) == 0 {
-			continue
-		}
-		e := rc.SRem(fmt.Sprintf("%s___%d", key, slot), pack...)
-		if e != nil {
-			err = e
-		}
-	}
-	return
-}
-
-func (rc *RedisCli) SGets(key string) (replys []string, finish bool, err error) {
-	var exist bool
-	exist, err = rc.Exists(fmt.Sprintf("%s___SLOT_NO", key))
-	if err != nil {
-		return
-	}
-	if !exist {
-		finish = true
-		err = errors.New("no exist slot queue.")
-		return
-	}
-	var reply int
-	reply, err = rc.Incr(fmt.Sprintf("%s___SLOT_NO", key))
-	if err != nil {
-		return
-	}
-	if reply <= 0 || reply > SET_SLOT_CNT {
-		err = errors.New("out of slot.")
-		finish = true
-		return
-	}
-	slot := reply - 1
-	replys, err = rc.SMembers(fmt.Sprintf("%s___%d", key, slot))
-	return
-}
-
 func (rc *RedisCli) SUnionstore(dkey string, args ...interface{}) (count int64, err error) {
 	var cli redis.Conn
 	cli, err = rc.get()
@@ -720,108 +617,5 @@ func (rc *RedisCli) ZScore(key, val string) (score int64, err error) {
 	}
 	defer rc.put(cli, &err)
 	score, err = redis.Int64(cli.Do("ZSCORE", key, val))
-	return
-}
-
-// 根据周期和时间戳生成本轮内的时间字符串
-func make_timestamp_by_period(period, ct int64) string {
-	if ct <= 0 {
-		return ""
-	}
-	stime := ""
-	ctime := time.Unix(ct, 0)
-	switch period {
-	case 0:
-		fallthrough
-	case 1:
-		fallthrough
-	case 5:
-		// 以秒为周期粒度
-		stime = fmt.Sprintf("%04d%02d%02d%02d%02d%02d", ctime.Year(), ctime.Month(), ctime.Day(), ctime.Hour(), ctime.Minute(), ctime.Second())
-	case 30:
-		// 以30秒为周期粒度,将1分钟分成上半分钟和下半分钟
-		half_min := "fh"
-		if ctime.Second() >= 30 {
-			half_min = "sh"
-		}
-		stime = fmt.Sprintf("%04d%02d%02d%02d%02d%s", ctime.Year(), ctime.Month(), ctime.Day(), ctime.Hour(), ctime.Minute(), half_min)
-	case 60:
-		// 以60秒为周期粒度
-		stime = fmt.Sprintf("%04d%02d%02d%02d%02d", ctime.Year(), ctime.Month(), ctime.Day(), ctime.Hour(), ctime.Minute())
-	default:
-		return ""
-	}
-	return stime
-}
-
-//通过key, val获取分片后zset key
-func GenZSetShardKey(key, val string) (shardKey string) {
-	hashval := murmur3.Sum64([]byte(val))
-	slot := hashval % ZSET_SLOT_CNT
-	return fmt.Sprintf("ZSET_SHARD_KEY_%s_%d", key, slot)
-}
-
-//重置ZSet分片计数器
-func (rc *RedisCli) ResetZSetShardCounter(key string, ts int64) (err error) {
-	err = rc.Setnx(fmt.Sprintf("%s___ZSET_SLOT_NO_%s", key, make_timestamp_by_period(60, ts)), "0")
-	return
-}
-
-//获取待处理的ZSet分片key
-func (rc *RedisCli) GetZSetShardKey(key string, ts int64) (shardKey string, err error) {
-	var exist bool
-	exist, err = rc.Exists(fmt.Sprintf("%s___ZSET_SLOT_NO_%s", key, make_timestamp_by_period(60, ts)))
-	if err != nil {
-		return
-	}
-	//不存在
-	if !exist {
-		err = errors.New("no exist slot queue.")
-		return
-	}
-	var reply int
-	reply, err = rc.Incr(fmt.Sprintf("%s___ZSET_SLOT_NO_%s", key, make_timestamp_by_period(60, ts)))
-	if err != nil {
-		return
-	}
-	if reply <= 0 || reply > ZSET_SLOT_CNT {
-		err = errors.New("out of slot.")
-		return
-	}
-	slot := reply - 1
-	shardKey = fmt.Sprintf("ZSET_SHARD_KEY_%s_%d", key, slot)
-	return
-}
-
-func (rc *RedisCli) ZAddShardKey(key string, ttl int64, value string, score int64) (err error) {
-	var (
-		oldScore int64
-	)
-
-	shardKey := GenZSetShardKey(key, value)
-	//获取value的score
-	oldScore, err = rc.ZScore(shardKey, value)
-	if err != nil && err != redis.ErrNil {
-		return
-	}
-	if oldScore >= score {
-		return
-	}
-	err = rc.ZAdd(shardKey, ttl, value, score)
-	return err
-}
-
-//获取满足score范围内的分片数据
-//并删除不满足score范围内的分片数据
-func (rc *RedisCli) ZRangeByScoreAndDelOutScoreShardKey(key string, min, max int, minopen, maxopen bool, ts int64) (result []string, err error) {
-	var (
-		shardKey string
-	)
-	shardKey, err = rc.GetZSetShardKey(key, ts)
-	if err != nil {
-		return
-	}
-	result, err = rc.ZRangeByScore(shardKey, min, max, minopen, maxopen)
-	rc.ZRemRangeByScore(shardKey, 0, ts)
 	return
 }

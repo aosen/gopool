@@ -19,7 +19,6 @@ package rediscli
 
 import (
 	"log"
-	"strconv"
 	"testing"
 )
 
@@ -106,18 +105,6 @@ func TestRedisCli(t *testing.T) {
 		return
 	}
 	log.Println("SPop success.", reply)
-	err = rc.SPush("spush", 10, func() []interface{} {
-		rt := []interface{}{}
-		for i := 0; i < 2048; i++ {
-			rt = append(rt, strconv.Itoa(i))
-		}
-		return rt
-	}()...)
-	if err != nil {
-		log.Println("SPush err:", err.Error())
-		return
-	}
-	log.Println("SPush success.")
 	slot := 0
 	for {
 		rlist, _, err = rc.SGets("spush")
