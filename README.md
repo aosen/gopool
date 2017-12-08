@@ -1,8 +1,8 @@
 # gopool
-By Golang realize distributed common connection pool.
-Golang分布式的连接池，协程池，内含redis client连接池实现
+* By Golang realize distributed common connection pool.
+* Golang分布式的连接池，协程池，内含redis client连接池实现
 
-go get github.com/aosen/gopool
+* go get github.com/aosen/gopool
 
 ## example
 ```
