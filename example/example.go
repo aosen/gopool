@@ -1,11 +1,29 @@
-# gopool
-By Golang realize distributed common connection pool.
-Golang分布式的连接池，协程池，内含redis client连接池实现
+/*
+Copyright 2017 gopool Author. All Rights Reserved.
 
-go get github.com/aosen/gopool
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
 
-## example
-```
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+
+Based on the channel of connection pool
+基于channel的连接池
+*/
+package main
+
+import (
+	"errors"
+	"net"
+	"time"
+)
+
 var addrs []string = []string{"127.0.0.1:8000", "127.0.0.1:8001", "127.0.0.1:8002", "127.0.0.1:8003"}
 
 var epool Pooler
@@ -64,4 +82,3 @@ func GetConnCount() map[string]int {
 	}
 	return epool.GetConnCount()
 }
-```
