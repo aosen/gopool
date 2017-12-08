@@ -105,17 +105,6 @@ func TestRedisCli(t *testing.T) {
 		return
 	}
 	log.Println("SPop success.", reply)
-	slot := 0
-	for {
-		rlist, _, err = rc.SGets("spush")
-		if err != nil {
-			log.Println("sgets err:", err.Error())
-			break
-		}
-		log.Println("sgets success.", rlist)
-		slot++
-	}
-	log.Println("sgets list success.", slot)
 	count, err = rc.SUnionstore("test_sunionstore", "test_spop")
 	if err != nil {
 		log.Println("SUnionstore err:", err.Error())
