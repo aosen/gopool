@@ -359,14 +359,14 @@ func (rc *RedisCli) SPop(key string) (reply string, err error) {
 	return
 }
 
-func (rc *RedisCli) SCard(key string) (reply []string, err error) {
+func (rc *RedisCli) SCard(key string) (reply int, err error) {
 	var cli redis.Conn
 	cli, err = rc.get()
 	if err != nil {
 		return
 	}
 	defer rc.put(cli, &err)
-	reply, err = redis.Strings(cli.Do("SCARD", key))
+	reply, err = redis.Int(cli.Do("SCARD", key))
 	return
 }
 
